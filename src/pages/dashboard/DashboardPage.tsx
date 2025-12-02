@@ -1,9 +1,9 @@
 // src/pages/dashboard/DashboardPage.tsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -16,90 +16,98 @@ import {
   useReactTable,
   VisibilityState,
 } from '@tanstack/react-table';
-import { ArrowUpDown, ChevronDown, MoreHorizontal } from 'lucide-react';
-
-interface Order {
-  id: number;
-  order_id: string;
-  order_status: 'AWAITING_COLLECTION' | 'COMPLETED' | 'CANCELLED' | string;
-  update_time: string;
-  order_sync: boolean;
-  created_date: string;
-}
-
-// Define columns
-const columns: ColumnDef<Order>[] = [
-  {
-    accessorKey: "order_id",
-    header: "ORDER ID",
-    cell: ({ row }) => (
-      <div className="font-medium">{row.getValue("order_id")}</div>
-    ),
-  },
-  {
-    accessorKey: "order_status",
-    header: "STATUS",
-    cell: ({ row }) => {
-      const status = row.getValue("order_status") as string
-      return (
-        <span className={`px-2 py-1 text-xs rounded-full ${
-          status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-          status === 'CANCELLED' ? 'bg-red-100 text-red-800' :
-          'bg-yellow-100 text-yellow-800'
-        }`}>
-          {status.replace(/_/g, ' ')}
-        </span>
-      )
-    },
-  },
-  {
-    accessorKey: "update_time",
-    header: "UPDATED",
-    cell: ({ row }) => (
-      <div>{new Date(parseInt(row.getValue("update_time")) * 1000).toLocaleString('id-ID')}</div>
-    ),
-  },
-  {
-    accessorKey: "order_sync",
-    header: "SYNC STATUS",
-    cell: ({ row }) => (
-      <div>{row.getValue("order_sync") ? '✅' : '❌'}</div>
-    ),
-  },
-]
+import { useFetchOrders, Order } from './fetchOrder';
 
 export default function DashboardPage() {
-  const [orders, setOrders] = useState<Order[]>([])
-  const [loading, setLoading] = useState(true)
+  const { orders, loading, stats, refetch } = useFetchOrders();
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState({})
 
-  // Group orders by date (keeping your existing grouping logic)
-  const ordersByDate = useMemo(() => {
-    return orders.reduce((groups, order) => {
-      const date = new Date(parseInt(order.update_time) * 1000).toLocaleDateString('id-ID', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-      if (!groups[date]) {
-        groups[date] = [];
-      }
-      groups[date].push(order);
-      return groups;
-    }, {} as Record<string, Order[]>);
-  }, [orders]);
+  // Define columns inside component to access refetch
+  const columns = useMemo<ColumnDef<Order>[]>(() => [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "order_id",
+      header: "ORDER ID",
+      cell: ({ row }) => (
+        <div className="font-medium">{row.getValue("order_id")}</div>
+      ),
+    },
+    {
+      accessorKey: "order_status",
+      header: "STATUS",
+      cell: ({ row }) => {
+        const status = row.getValue("order_status") as string
+        return (
+          <span className={`px-2 py-1 text-xs rounded-full ${status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+            status === 'CANCELLED' ? 'bg-red-100 text-red-800' :
+              'bg-yellow-100 text-yellow-800'
+            }`}>
+            {status.replace(/_/g, ' ')}
+          </span>
+        )
+      },
+    },
+    {
+      accessorKey: "update_time",
+      header: "UPDATED",
+      cell: ({ row }) => (
+        <div>{new Date(parseInt(row.getValue("update_time")) * 1000).toLocaleString('id-ID')}</div>
+      ),
+    },
+    {
+      accessorKey: "order_sync",
+      header: "SYNC STATUS",
+      cell: ({ row }) => (
+        <div className="flex items-center space-x-2">
+          <span>{row.getValue("order_sync") ? '✅' : '❌'}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const orderId = row.getValue("order_id");
+                const response = await fetch(`/api/rindex.php?r=tiktok/sync-order-id&order_id=${orderId}`);
+                const result = await response.json();
 
-  const [stats, setStats] = useState({
-    total: 0,
-    awaitingCollection: 0,
-    completed: 0,
-    cancelled: 0,
-    synced: 0
-  })
+                if (result.success) {
+                  refetch();
+                }
+              } catch (error) {
+                console.error('Error syncing order:', error);
+              }
+            }}
+            disabled={row.getValue("order_sync")}
+          >
+            {row.getValue("order_sync") ? 'Synced' : 'Sync Now'}
+          </Button>
+        </div>
+      ),
+    },
+  ], [refetch]);
 
   // Initialize the table
   const table = useReactTable({
@@ -121,37 +129,6 @@ export default function DashboardPage() {
     },
   })
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        const response = await fetch('/api/rindex.php?r=tiktok/api-order');
-        const result = await response.json();
-        
-        if (result && Array.isArray(result.order_list)) {
-          const orders = result.order_list; // Access the order_list array
-          setOrders(orders);
-          
-          // Calculate statistics
-          const stats = {
-            total: orders.length,
-            awaitingCollection: orders.filter(order => order.order_status === 'AWAITING_COLLECTION').length,
-            completed: orders.filter(order => order.order_status === 'COMPLETED').length,
-            cancelled: orders.filter(order => order.order_status === 'CANCELLED').length,
-            synced: orders.filter(order => order.order_sync).length
-          };
-          setStats(stats);
-        }
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching orders:', error);
-        setLoading(false);
-        // Handle error state if needed
-      }
-    };
-
-    fetchOrders();
-  }, []);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -168,7 +145,7 @@ export default function DashboardPage() {
           Overview of your TikTok orders and their status.
         </p>
       </div>
-      
+
       {/* Statistics Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card>
@@ -216,14 +193,19 @@ export default function DashboardPage() {
       {/* Enhanced Data Table */}
       <div className="rounded-md border">
         <div className="flex items-center justify-between p-4">
-          <Input
-            placeholder="Filter orders by ID..."
-            value={(table.getColumn('order_id')?.getFilterValue() as string) ?? ''}
+          <select
+            value={(table.getColumn('order_status')?.getFilterValue() as string) ?? ''}
             onChange={(event) =>
-              table.getColumn('order_id')?.setFilterValue(event.target.value)
+              table.getColumn('order_status')?.setFilterValue(event.target.value || undefined)
             }
-            className="max-w-sm"
-          />
+            className="max-w-sm border rounded-md p-2 text-sm"
+          >
+            <option value="">All Status</option>
+            <option value="AWAITING_COLLECTION">Awaiting Collection</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="IN TRANSIT">In Transit</option>
+          </select>
           <div className="flex space-x-2">
             <Button
               variant="outline"
@@ -253,9 +235,9 @@ export default function DashboardPage() {
                       {header.isPlaceholder
                         ? null
                         : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -263,13 +245,13 @@ export default function DashboardPage() {
             </TableHeader>
             <TableBody>
               {table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => (
+                table.getRowModel().rows.map((row, rowIndex) => (
                   <TableRow
-                    key={row.id}
+                    key={`${row.id}_${rowIndex}`}
                     data-state={row.getIsSelected() && 'selected'}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
+                      <TableCell key={`${cell.id}_${rowIndex}`}>
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
